@@ -1,3 +1,5 @@
+# This is my solution to ZKHack IV Puzzle 1. Solution is in src/main.rs
+
 # puzzle-gamma-ray
 
 **DO NOT FORK THE REPOSITORY, AS IT WILL MAKE YOUR SOLUTION PUBLIC. INSTEAD, CLONE IT AND ADD A NEW REMOTE TO A PRIVATE REPOSITORY, OR SUBMIT A GIST**
