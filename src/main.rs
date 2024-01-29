@@ -1,4 +1,5 @@
 use ark_ec::AffineRepr;
+use ark_ec::CurveGroup;
 use ark_ff::PrimeField;
 use ark_mnt4_753::{Fr as MNT4BigFr, MNT4_753};
 use ark_mnt6_753::G1Affine;
@@ -95,6 +96,8 @@ impl ConstraintSynthesizer<ConstraintF> for SpendCircuit {
 
         let secret = FpVar::new_witness(ark_relations::ns!(cs, "secret"), || Ok(self.secret))?;
         let secret_bits = secret.to_bits_le()?;
+        //@note make sure bits of secret form a number inside the field
+        //@note is it a problem if the secret is zero?
         Boolean::enforce_smaller_or_equal_than_le(&secret_bits, MNT6BigFr::MODULUS)?;
 
         let nullifier = <LeafHG as CRHSchemeGadget<LeafH, _>>::OutputVar::new_input(
@@ -107,6 +110,14 @@ impl ConstraintSynthesizer<ConstraintF> for SpendCircuit {
         nullifier_in_circuit.enforce_equal(&nullifier)?;
 
         let base = G1Var::new_constant(ark_relations::ns!(cs, "base"), G1Affine::generator())?;
+        /*
+        @note
+        •   can you load the secret, calculate the additive inverse of sG
+            by computing the additive inverse of s? 
+        •   then -SG has the same x coordinate as the original starting leaf? then
+            calculate the nullifier from this new secret which will be different
+
+        */
         let pk = base.scalar_mul_le(secret_bits.iter())?.to_affine()?;
 
         // Allocate Leaf
@@ -116,6 +127,8 @@ impl ConstraintSynthesizer<ConstraintF> for SpendCircuit {
         let cw: PathVar<MntMerkleTreeParams, ConstraintF, MntMerkleTreeParamsVar> =
             PathVar::new_witness(ark_relations::ns!(cs, "new_witness"), || Ok(&self.proof))?;
 
+        //@note why are they only using the x coordinate of generator point?
+        //@note can i choose the negation of the nullifier hash?
         cw.verify_membership(
             &leaf_crh_params_var,
             &two_to_one_crh_params_var,
@@ -141,6 +154,7 @@ fn main() {
 
     let rng = &mut ark_std::rand::rngs::StdRng::seed_from_u64(0u64);
 
+    //@note leaves of tree
     let leaves: Vec<Vec<MNT4BigFr>> = from_file("./leaves.bin");
     let leaked_secret: MNT4BigFr = from_file("./leaked_secret.bin");
     let (pk, vk): (
@@ -148,11 +162,18 @@ fn main() {
         <Groth16<MNT4_753> as SNARK<MNT4BigFr>>::VerifyingKey,
     ) = from_file("./proof_keys.bin");
 
+    //@note get poseidon hash function parameters for hashing leaves
     let leaf_crh_params = poseidon_parameters::poseidon_parameters();
     let i = 2;
+    //@note hash two child hashes. same params as leaves
+    //@note hash function uses sponge.absorb in implementation for
+    //@note two-to-one case
+    //@note no distinction between hashing leaves and hashing other nodes
     let two_to_one_crh_params = leaf_crh_params.clone();
 
+    //@note nullifier is hash of secret using the leaf hashing params
     let nullifier = <LeafH as CRHScheme>::evaluate(&leaf_crh_params, vec![leaked_secret]).unwrap();
+    //println!("nullifier is {:?}", nullifier);
 
     let tree = MntMerkleTree::new(
         &leaf_crh_params,
@@ -173,9 +194,20 @@ fn main() {
         )
         .unwrap());
 
+    /*
+    @note
+    struct SpendCircuit {
+        pub leaf_params: <LeafH as CRHScheme>::Parameters,
+        pub two_to_one_params: <LeafH as CRHScheme>::Parameters,
+        pub root: <CompressH as TwoToOneCRHScheme>::Output,
+        pub proof: Path<MntMerkleTreeParams>,
+        pub secret: ConstraintF,
+        pub nullifier: ConstraintF,
+    }
+    */
     let c = SpendCircuit {
         leaf_params: leaf_crh_params.clone(),
-        two_to_one_params: two_to_one_crh_params.clone(),
+        two_to_one_params: two_to_one_crh_params.clone(), //@note same as prev arg
         root: root.clone(),
         proof: tree_proof.clone(),
         nullifier: nullifier.clone(),
@@ -188,8 +220,9 @@ fn main() {
 
     /* Enter your solution here */
 
-    let nullifier_hack = MNT4BigFr::from(0);
-    let secret_hack = MNT4BigFr::from(0);
+    let secret_hack = MNT4BigFr::from(MNT6BigFr::MODULUS) - leaked_secret;
+
+    let nullifier_hack = <LeafH as CRHScheme>::evaluate(&leaf_crh_params, vec![secret_hack]).unwrap();
 
     /* End of solution */
 
